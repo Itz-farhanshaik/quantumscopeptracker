@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quantum Scope Project Tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="ambient ambient-left"></div>
+      <div class="ambient ambient-right"></div>
+      <button class="ghost-button floating-back-button hidden" id="back-button" type="button">Back</button>
+
+      <header class="topbar">
+        <div class="brand-lockup">
+          <p class="brand-mark">Quantum Scope</p>
+          <h1>Project tracker</h1>
+          <p class="brand-subtitle" id="screen-subtitle">
+            Integrated project control for scope, schedule, issues, and resource decisions.
+          </p>
+        </div>
+        <div class="topbar-controls">
+          <div class="role-chip" id="role-chip">Access: choose a role</div>
+          <button class="ghost-button hidden" id="logout-button" type="button">Log out</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="screen active" data-screen="login">
+          <div class="auth-shell">
+            <div class="auth-brand">
+              <p class="brand-mark auth-brand-mark">Quantum Scope</p>
+            </div>
+            <div class="auth-card">
+              <div id="login-role-picker">
+                <p class="auth-role-label">Choose access</p>
+                <h2>Login</h2>
+                <p class="auth-subcopy">Select the workspace you want to enter, then continue with your account.</p>
+                <div class="auth-role-grid">
+                  <button class="auth-role-button" id="login-manager-button" type="button">Project manager</button>
+                  <button class="auth-role-button" id="login-member-button" type="button">Team member</button>
+                </div>
+              </div>
+
+              <div class="hidden" id="login-form-panel">
+                <p class="auth-role-label" id="login-role-label">Project manager</p>
+                <h2>Login</h2>
+                <p class="auth-subcopy">Use your saved account details to continue to the dashboard.</p>
+                <div class="auth-field-stack">
+                  <div class="auth-field-row">
+                    <span class="auth-field-tag">Email address</span>
+                    <label class="field auth-field full-span">
+                      <span class="sr-only">Email address</span>
+                      <input id="login-email-input" type="email" placeholder="Enter email address" autocomplete="email" />
+                    </label>
+                  </div>
+                  <div class="auth-field-row">
+                    <span class="auth-field-tag">Password</span>
+                    <label class="field auth-field full-span">
+                      <span class="sr-only">Password</span>
+                      <input id="login-password-input" type="password" placeholder="Enter password" autocomplete="current-password" />
+                    </label>
+                  </div>
+                </div>
+                <div class="inline-actions auth-actions">
+                  <button class="primary-button auth-submit-button" id="login-button" type="button">Submit</button>
+                </div>
+              </div>
+              <div class="auth-feedback hidden" id="login-feedback"></div>
+              <p class="auth-note">Enter your email address and password to continue.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="project-list">
+          <div class="home-shell">
+            <section class="home-hero glass-panel">
+              <div class="home-hero-copy">
+                <p class="eyebrow">Live workspace</p>
+                <h2>One calm place for project decisions, timing, and team movement.</h2>
+                <p class="home-hero-text">
+                  Enter as a project leader or team member, open the right project, and keep updates focused on delays,
+                  issues, and meaningful project changes.
+                </p>
+              </div>
+              <div class="home-role-panel">
+                <p class="eyebrow">Choose your access</p>
+                <div class="landing-toolbar">
+                  <button class="primary-button" id="enter-manager-button" type="button">
+                    Enter as Project Manager / Leader
+                  </button>
+                  <button class="ghost-button" id="enter-member-button" type="button">Enter as Team member</button>
+                  <button class="ghost-button subtle-button" id="clear-role-button" type="button">Clear role</button>
+                </div>
+                <div class="live-banner" id="landing-role-status">
+                  Select a role first. Project managers can create the first project when the tracker is empty.
+                </div>
+              </div>
+            </section>
+
+            <section class="home-summary">
+              <div class="summary-card">
+                <span class="summary-label">Projects</span>
+                <strong id="home-project-total">0</strong>
+              </div>
+              <div class="summary-card">
+                <span class="summary-label">Teams</span>
+                <strong id="home-team-total">0</strong>
+              </div>
+              <div class="summary-card">
+                <span class="summary-label">Live updates</span>
+                <strong id="home-update-total">0</strong>
+              </div>
+            </section>
+
+            <section class="home-projects-shell">
+              <div class="home-projects-heading">
+                <div>
+                  <p class="eyebrow">Project register</p>
+                  <h3>Open an active project</h3>
+                </div>
+                <div class="landing-toolbar hidden" id="manager-project-toolbar">
+                  <button class="primary-button" id="manager-create-project-button" type="button">Initiate project</button>
+                  <div class="pill">Projects update live across open tabs</div>
+                </div>
+              </div>
+
+              <div class="empty-state-panel" id="empty-state-panel">
+                <div>
+                  <p class="eyebrow">No projects yet</p>
+                  <h3>The tracker opens empty now</h3>
+                  <p>
+                    This workspace no longer ships with sample projects. Managers and leaders create the real projects from
+                    scratch.
+                  </p>
+                </div>
+                <div class="inline-actions">
+                  <button class="primary-button" id="empty-create-button" type="button">Create first project</button>
+                </div>
+              </div>
+
+              <div class="card-grid home-project-grid" id="project-grid"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="role-select">
+          <div class="intro-copy">
+            <p class="eyebrow">Project access</p>
+            <h2>What role do you play in this project?</h2>
+            <p id="selected-project-copy"></p>
+          </div>
+          <div class="role-grid">
+            <button class="feature-card role-card" data-role="manager" type="button">
+              <span class="feature-title">Project Manager / Leader</span>
+              <span class="feature-copy">
+                Full control over project scope, activities, resource teams, and schedule changes.
+              </span>
+            </button>
+            <button class="feature-card role-card" data-role="member" type="button">
+              <span class="feature-title">Team member</span>
+              <span class="feature-copy">
+                Review assignments and log defects, issues, or schedule delays with live updates.
+              </span>
+            </button>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="manager-home">
+          <div class="intro-copy compact">
+            <p class="eyebrow">Project Manager / Leader</p>
+            <h2 id="manager-home-title"></h2>
+            <p>A simpler dashboard for project decisions, active issues, and schedule pressure.</p>
+          </div>
+
+          <div class="card-grid manager-grid">
+            <button class="feature-card nav-card" data-target="project-progress" type="button">
+              <span class="feature-title">Work performance</span>
+              <span class="feature-copy">See percent complete, defect load, issue count, and schedule pressure.</span>
+            </button>
+            <button class="feature-card nav-card" data-target="scheduler" type="button">
+              <span class="feature-title">Project schedule</span>
+              <span class="feature-copy">Edit activities and push schedule changes through dependent work.</span>
+            </button>
+            <button class="feature-card nav-card" data-target="team-management" type="button">
+              <span class="feature-title">Resource planning</span>
+              <span class="feature-copy">Manage resource teams, assignments, dependencies, and activity ownership.</span>
+            </button>
+            <button class="feature-card nav-card" data-target="new-project" type="button">
+              <span class="feature-title">Initiate a project</span>
+              <span class="feature-copy">Create another project charter without leaving the tracker.</span>
+            </button>
+            <button class="feature-card nav-card" data-target="base-code" type="button">
+              <span class="feature-title">Project approach</span>
+              <span class="feature-copy">Keep technical guidance, approach notes, and implementation context together.</span>
+            </button>
+            <button class="feature-card nav-card" data-target="assistant" type="button">
+              <span class="feature-title">Project analysis</span>
+              <span class="feature-copy">Ask the local assistant about risk, schedule, resources, or critical path.</span>
+            </button>
+          </div>
+
+          <div class="manager-danger-zone">
+            <button class="primary-button" id="edit-project-button" type="button">Edit current project</button>
+            <button class="danger-button" id="remove-project-button" type="button">Remove this project</button>
+          </div>
+
+          <div class="manager-live-grid">
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Delays, issues, and project changes</h3>
+                <span class="pill accent" id="command-center-count">0 live updates</span>
+              </div>
+              <div class="note-feed" id="manager-live-feed"></div>
+            </div>
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Resource pulse</h3>
+                <span class="pill">Live team overview</span>
+              </div>
+              <div class="pulse-grid" id="manager-pulse-grid"></div>
+            </div>
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Risk register watchlist</h3>
+                <span class="pill">Finds hidden slips</span>
+              </div>
+              <div class="list-panel risk-panel" id="manager-risk-panel"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="team-select">
+          <div class="intro-copy">
+            <p class="eyebrow">Team member</p>
+            <h2>Choose the team you are part of</h2>
+            <p>Each team page keeps delay and issue reporting simple so important changes surface instantly.</p>
+          </div>
+          <div class="card-grid" id="team-grid"></div>
+        </section>
+
+        <section class="screen" data-screen="team-home">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Team workspace</p>
+              <h2 id="team-home-title"></h2>
+            </div>
+            <div class="team-badge" id="team-home-project"></div>
+          </div>
+
+          <div class="two-column">
+            <div class="glass-panel">
+              <h3>Assigned activities</h3>
+              <ul class="list-panel" id="team-task-list"></ul>
+            </div>
+            <div class="glass-panel">
+              <h3>Activity status and ownership</h3>
+              <ul class="list-panel" id="team-status-list"></ul>
+            </div>
+          </div>
+
+          <div class="two-column">
+            <div class="glass-panel">
+              <h3>Predecessor teams</h3>
+              <ul class="list-panel" id="team-dependency-list"></ul>
+            </div>
+            <div class="glass-panel">
+              <h3>Successor teams</h3>
+              <ul class="list-panel" id="team-dependent-list"></ul>
+            </div>
+          </div>
+
+          <div class="two-column align-start">
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Delay or issue entry</h3>
+                <span class="pill">Log defects, issues, and delays</span>
+              </div>
+              <div class="form-grid">
+                <label class="field">
+                  Report type
+                  <select id="report-type-select">
+                    <option value="bug">Defect</option>
+                    <option value="blocker" selected>Issue</option>
+                    <option value="delay">Schedule delay</option>
+                  </select>
+                </label>
+                <label class="field">
+                  Severity
+                  <select id="report-severity-select">
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </label>
+                <label class="field">
+                  Related activity
+                  <select id="report-task-select"></select>
+                </label>
+                <label class="field">
+                  Schedule impact
+                  <select id="report-delay-select">
+                    <option value="0">No schedule shift</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="120">2 hours</option>
+                    <option value="240">4 hours</option>
+                    <option value="480">8 hours</option>
+                    <option value="1440">1 day</option>
+                  </select>
+                </label>
+                <label class="field full-span">
+                  Summary
+                  <input id="report-title-input" type="text" placeholder="Validation defect still blocks API handoff" />
+                </label>
+                <label class="field full-span">
+                  Description
+                  <textarea
+                    id="report-body-input"
+                    class="text-area"
+                    rows="5"
+                    placeholder="Describe the issue or delay, its impact, and any action already taken..."
+                  ></textarea>
+                </label>
+              </div>
+              <div class="inline-actions">
+                <button class="primary-button" id="submit-live-report" type="button">Submit issue log entry</button>
+              </div>
+            </div>
+
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Recent delays and issues</h3>
+                <span class="pill accent">Project manager sees these instantly</span>
+              </div>
+              <div class="note-feed" id="team-note-feed"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="project-progress">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Work performance</p>
+              <h2 id="progress-title"></h2>
+            </div>
+            <div class="metric-chip" id="progress-chip"></div>
+          </div>
+
+          <div class="progress-layout">
+            <div class="glass-panel">
+              <h3>Completion</h3>
+              <div class="progress-bar-shell">
+                <div class="progress-bar-fill" id="progress-bar-fill"></div>
+              </div>
+              <p class="helper-copy" id="progress-percent-copy"></p>
+            </div>
+            <div class="glass-panel">
+              <h3>Defect and issue summary</h3>
+              <ul class="list-panel" id="bug-list"></ul>
+            </div>
+            <div class="glass-panel chart-panel">
+              <h3>Team performance balance</h3>
+              <div class="chart-bars" id="chart-bars"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="scheduler">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Project schedule</p>
+              <h2 id="scheduler-title"></h2>
+            </div>
+            <button class="primary-button" id="add-task-button" type="button">Add activity</button>
+          </div>
+
+          <div class="glass-panel">
+            <div class="scheduler-table-wrap">
+              <table class="scheduler-table">
+                <thead>
+                  <tr>
+                    <th>Activity</th>
+                    <th>Resource Team</th>
+                    <th>Predecessor</th>
+                    <th>Planned Start</th>
+                    <th>Planned Finish</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Control Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="scheduler-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="two-column align-start">
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Schedule log</h3>
+                <span class="pill accent">Every timing shift is recorded</span>
+              </div>
+              <div class="note-feed" id="scheduler-log"></div>
+            </div>
+            <div class="glass-panel">
+              <div class="panel-heading">
+                <h3>Schedule impact analysis</h3>
+                <span class="pill">Downstream impact</span>
+              </div>
+              <div class="list-panel risk-panel" id="impact-board"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="assistant">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Project analysis</p>
+              <h2>Ask about risk, schedule, resources, or dependencies</h2>
+            </div>
+            <div class="team-badge">Local project intelligence</div>
+          </div>
+          <div class="glass-panel">
+            <div class="assistant-launch-note">
+              This helper works locally now, so the tracker stays fully functional even before any external AI API is
+              connected.
+            </div>
+            <div class="assistant-feed" id="assistant-feed"></div>
+            <div class="assistant-row">
+              <input
+                class="assistant-input"
+                id="assistant-input"
+                type="text"
+                placeholder="Try: what is at risk? or which team has the most issues?"
+              />
+              <button class="primary-button" id="assistant-send" type="button">Ask</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="base-code">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Project approach</p>
+              <h2>Project management approach and technical notes</h2>
+            </div>
+            <div class="team-badge">Manager editable</div>
+          </div>
+          <div class="glass-panel">
+            <textarea id="base-code-input" class="code-area" spellcheck="false"></textarea>
+            <div class="inline-actions">
+              <button class="primary-button" id="save-base-code" type="button">Save project approach</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="team-management">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Resource and activity management</p>
+              <h2>Resource teams, assignments, and activity structure</h2>
+            </div>
+            <div class="team-badge">Only editable as Project Manager / Leader</div>
+          </div>
+
+          <div class="two-column align-start">
+            <div class="glass-panel">
+              <h3>Resource teams</h3>
+              <div class="counter-row">
+                <button class="ghost-button" id="remove-team-button" type="button">Remove team</button>
+                <div class="counter-display" id="team-count-display"></div>
+                <button class="primary-button" id="add-team-button" type="button">Add team</button>
+              </div>
+            </div>
+            <div class="glass-panel">
+              <h3>Resource assignments</h3>
+              <label class="field">
+                Select resource team
+                <select id="employee-team-select"></select>
+              </label>
+              <textarea
+                id="employee-list-input"
+                class="text-area"
+                rows="7"
+                placeholder="One resource per line"
+              ></textarea>
+              <div class="inline-actions">
+                <button class="primary-button" id="save-employee-list" type="button">Save assignments</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-panel">
+            <h3>Activity editor</h3>
+            <div class="form-grid">
+              <label class="field">
+                Resource team
+                <select id="task-team-select"></select>
+              </label>
+              <label class="field">
+                Activity name
+                <input id="task-title-input" type="text" placeholder="Document defect analysis findings" />
+              </label>
+              <label class="field">
+                Predecessor activity
+                <select id="task-dependency-select"></select>
+              </label>
+              <label class="field">
+                Priority
+                <select id="task-priority-select">
+                  <option value="Low">Low</option>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </label>
+              <label class="field">
+                Planned start
+                <input id="task-start-input" type="datetime-local" />
+              </label>
+              <label class="field">
+                Planned finish
+                <input id="task-end-input" type="datetime-local" />
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button class="primary-button" id="create-task-button" type="button">Create activity</button>
+            </div>
+            <ul class="task-editor-list" id="manager-task-list"></ul>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="new-project">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Project initiation</p>
+              <h2 id="project-form-title">Develop Project Charter</h2>
+            </div>
+            <div class="team-badge" id="project-form-mode">Initiation workflow</div>
+          </div>
+
+          <div class="glass-panel">
+            <div class="form-grid">
+              <label class="field">
+                Project title
+                <input id="new-project-name" type="text" placeholder="Revenue analytics rollout" />
+              </label>
+              <label class="field">
+                Target completion date
+                <input id="new-project-deadline" type="date" />
+              </label>
+              <label class="field">
+                Initial resource team count
+                <input id="new-project-team-count" type="number" min="1" max="12" value="2" />
+              </label>
+              <label class="field full-span">
+                Project Scope Statement
+                <textarea
+                  id="new-project-description"
+                  class="text-area"
+                  rows="4"
+                  placeholder="Document the project objectives, major deliverables, boundaries, assumptions, and exclusions."
+                ></textarea>
+              </label>
+              <label class="field full-span">
+                Project approach and technical notes
+                <textarea
+                  id="new-project-code"
+                  class="code-area"
+                  rows="8"
+                  placeholder="Capture the execution approach, technical assumptions, and implementation guidance."
+                ></textarea>
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button class="primary-button" id="create-project-button" type="button">Create project charter</button>
+              <button class="ghost-button" id="update-project-button" type="button">Update project charter</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="assistant-message-template">
+      <div class="assistant-bubble">
+        <span class="assistant-speaker"></span>
+        <p></p>
+      </div>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
