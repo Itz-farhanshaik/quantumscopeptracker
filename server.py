@@ -1,354 +1,357 @@
-#!/usr/bin/env python3
-from __future__ import annotations
-
-import argparse
-import hashlib
 import json
 import os
-import smtplib
-import ssl
-from datetime import datetime, timezone
-from email.message import EmailMessage
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+import pathlib
+import hashlib
+import hmac
+import secrets
+import sqlite3
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
-BUILT_IN_ACCOUNTS = {
-    "tester001@qscope": "test001",
-    "admin@qscope": "admin",
+ROOT = pathlib.Path(__file__).resolve().parent
+load_env_path = ROOT / ".env.local"
+
+
+def load_env_file(file_path: pathlib.Path) -> None:
+    if not file_path.exists():
+        return
+
+    for raw_line in file_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+load_env_file(load_env_path)
+
+HOST = "127.0.0.1"
+PORT = int(os.environ.get("PORT", "3000"))
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+API_KEY = os.environ.get("GEMINI_API_KEY", "")
+AUTH_DB_PATH = ROOT / "auth.db"
+PBKDF2_ITERATIONS = 200_000
+
+MIME_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
 }
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the QScope project tracker server.")
-    parser.add_argument("--port", type=int, default=8000, help="Port to listen on.")
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Host to bind to. Use 0.0.0.0 to listen on all interfaces.",
-    )
-    return parser.parse_args()
-
-
-def json_response(handler: SimpleHTTPRequestHandler, status: int, payload: dict[str, object]) -> None:
-    body = json.dumps(payload).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
-
-
-def html_response(handler: SimpleHTTPRequestHandler, status: int, title: str, message: str) -> None:
-    body = f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
-    <style>
-      body {{
-        font-family: system-ui, sans-serif;
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: #97b1ea;
-        color: #334e7f;
-      }}
-      main {{
-        background: #f8df9d;
-        padding: 32px;
-        border-radius: 24px;
-        max-width: 640px;
-        margin: 24px;
-        box-shadow: 0 24px 50px rgba(56, 76, 133, 0.16);
-      }}
-      a {{
-        color: inherit;
-      }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>{title}</h1>
-      <p>{message}</p>
-      <p><a href="/">Back to the app</a></p>
-    </main>
-  </body>
-</html>"""
-    data = body.encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.send_header("Content-Length", str(len(data)))
-    handler.end_headers()
-    handler.wfile.write(data)
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(f"qscope::{password}".encode("utf-8")).hexdigest()
-
-
-def load_state(state_file: Path) -> dict[str, list[dict[str, object]]]:
-    if not state_file.exists():
-        return {"approved_accounts": [], "pending_accounts": []}
-
-    try:
-        with state_file.open("r", encoding="utf-8") as file_handle:
-            state = json.load(file_handle)
-    except (json.JSONDecodeError, OSError):
-        return {"approved_accounts": [], "pending_accounts": []}
-
-    if not isinstance(state, dict):
-        return {"approved_accounts": [], "pending_accounts": []}
-
-    approved_accounts = state.get("approved_accounts", [])
-    pending_accounts = state.get("pending_accounts", [])
-    return {
-        "approved_accounts": approved_accounts if isinstance(approved_accounts, list) else [],
-        "pending_accounts": pending_accounts if isinstance(pending_accounts, list) else [],
-    }
-
-
-def save_state(state_file: Path, state: dict[str, list[dict[str, object]]]) -> None:
-    with state_file.open("w", encoding="utf-8") as file_handle:
-        json.dump(state, file_handle, indent=2)
-
-
-def send_approval_email(
-    recipient: str,
-    approval_link: str,
-    denial_link: str,
-    applicant_email: str,
-) -> None:
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_password = os.getenv("SMTP_PASSWORD", "")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user)
-
-    if not smtp_host or not smtp_user or not smtp_password or not smtp_from:
-        raise RuntimeError(
-            "SMTP is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM."
-        )
-
-    message = EmailMessage()
-    message["Subject"] = f"QScope registration approval needed for {applicant_email}"
-    message["From"] = smtp_from
-    message["To"] = recipient
-    message.set_content(
-        "\n".join(
-            [
-                f"A registration request was submitted for {applicant_email}.",
-                "",
-                f"Approve: {approval_link}",
-                f"Deny: {denial_link}",
-            ]
-        )
-    )
-
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
-        smtp.starttls(context=context)
-        smtp.login(smtp_user, smtp_password)
-        smtp.send_message(message)
-
-
-class AppHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, state_file: Path, approval_email: str, **kwargs):
-        self.state_file = state_file
-        self.approval_email = approval_email
-        super().__init__(*args, **kwargs)
-
-    def log_message(self, format: str, *args) -> None:  # noqa: A003
-        print(format % args)
-
-    def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-
-        if parsed.path == "/approve":
-            self.handle_decision(parsed, approved=True)
-            return
-
-        if parsed.path == "/deny":
-            self.handle_decision(parsed, approved=False)
-            return
-
-        super().do_GET()
-
-    def do_POST(self) -> None:
-        parsed = urlparse(self.path)
-
-        if parsed.path == "/api/login":
-            self.handle_login()
-            return
-
-        if parsed.path == "/api/register":
-            self.handle_register()
-            return
-
-        json_response(self, 404, {"ok": False, "message": "Unknown endpoint."})
-
-    def read_json(self) -> dict[str, object]:
-        content_length = int(self.headers.get("Content-Length", "0"))
-        raw_body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
-        try:
-            payload = json.loads(raw_body)
-        except json.JSONDecodeError:
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    def handle_login(self) -> None:
-        payload = self.read_json()
-        email = str(payload.get("email", "")).strip().lower()
-        password = str(payload.get("password", ""))
-
-        if not email or not password:
-            json_response(self, 400, {"ok": False, "message": "Email and password are required."})
-            return
-
-        if BUILT_IN_ACCOUNTS.get(email) == password:
-            json_response(self, 200, {"ok": True, "email": email, "source": "built-in"})
-            return
-
-        state = load_state(self.state_file)
-        for account in state["approved_accounts"]:
-            if account.get("email") == email and account.get("password_hash") == hash_password(password):
-                json_response(self, 200, {"ok": True, "email": email, "source": "approved"})
-                return
-
-        json_response(self, 401, {"ok": False, "message": "Invalid email or password."})
-
-    def handle_register(self) -> None:
-        payload = self.read_json()
-        email = str(payload.get("email", "")).strip().lower()
-        password = str(payload.get("password", ""))
-
-        if not email or not password:
-            json_response(self, 400, {"ok": False, "message": "Email and password are required."})
-            return
-
-        if email in BUILT_IN_ACCOUNTS:
-            json_response(self, 409, {"ok": False, "message": "That account already exists."})
-            return
-
-        state = load_state(self.state_file)
-        if any(account.get("email") == email for account in state["approved_accounts"]):
-            json_response(self, 409, {"ok": False, "message": "That account already exists."})
-            return
-
-        if any(account.get("email") == email for account in state["pending_accounts"]):
-            json_response(self, 409, {"ok": False, "message": "That account is already waiting for approval."})
-            return
-
-        token = hashlib.sha256(f"{email}:{password}:{now_iso()}".encode("utf-8")).hexdigest()
-        pending_account = {
-            "email": email,
-            "password_hash": hash_password(password),
-            "token": token,
-            "created_at": now_iso(),
-        }
-
-        base_url = os.getenv("APPROVAL_BASE_URL", f"http://127.0.0.1:{self.server.server_address[1]}")
-        approval_link = f"{base_url}/approve?token={token}"
-        denial_link = f"{base_url}/deny?token={token}"
-
-        try:
-            send_approval_email(self.approval_email, approval_link, denial_link, email)
-        except Exception as error:  # noqa: BLE001
-            json_response(
-                self,
-                500,
-                {
-                    "ok": False,
-                    "message": f"Approval email could not be sent: {error}",
-                },
+def init_auth_db() -> None:
+    with sqlite3.connect(AUTH_DB_PATH) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                role TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                password_salt TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(email, role)
             )
+            """
+        )
+        connection.commit()
+
+
+def hash_password(password: str, salt_hex: str) -> str:
+    salt = bytes.fromhex(salt_hex)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS
+    )
+    return digest.hex()
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def is_valid_role(value: str) -> bool:
+    return value in {"manager", "member"}
+
+
+def is_valid_email(value: str) -> bool:
+    return bool(value) and "@" in value and "." in value and " " not in value
+
+
+def create_or_verify_user(email: str, role: str, password: str):
+    now = current_timestamp()
+    with sqlite3.connect(AUTH_DB_PATH) as connection:
+        row = connection.execute(
+            """
+            SELECT password_hash, password_salt
+            FROM users
+            WHERE email = ? AND role = ?
+            """,
+            (email, role),
+        ).fetchone()
+
+        if row is None:
+            salt_hex = secrets.token_hex(16)
+            password_hash = hash_password(password, salt_hex)
+            connection.execute(
+                """
+                INSERT INTO users (email, role, password_hash, password_salt, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (email, role, password_hash, salt_hex, now, now),
+            )
+            connection.commit()
+            return {"email": email, "role": role, "created": True}
+
+        password_hash, password_salt = row
+        supplied_hash = hash_password(password, password_salt)
+        if not hmac.compare_digest(password_hash, supplied_hash):
+            return None
+
+        connection.execute(
+            """
+            UPDATE users
+            SET updated_at = ?
+            WHERE email = ? AND role = ?
+            """,
+            (now, email, role),
+        )
+        connection.commit()
+        return {"email": email, "role": role, "created": False}
+
+
+class ProjectTrackerHandler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path == "/api/health":
+            self.write_json(200, {"ok": True, "model": MODEL})
             return
 
-        state["pending_accounts"].append(pending_account)
-        save_state(self.state_file, state)
+        self.serve_static()
 
-        json_response(
-            self,
+    def do_POST(self):
+        if self.path == "/api/auth/login":
+            self.handle_auth_login()
+            return
+
+        if self.path == "/api/agent":
+            self.handle_agent_request()
+            return
+
+        self.write_json(405, {"error": "Method not allowed."})
+
+    def handle_auth_login(self):
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self.write_json(400, {"error": "Invalid JSON body."})
+            return
+
+        email = normalize_email(str(payload.get("email", "")))
+        password = str(payload.get("password", ""))
+        role = str(payload.get("role", "")).strip().lower()
+
+        if not is_valid_role(role):
+            self.write_json(400, {"error": "Choose either project manager or team member."})
+            return
+
+        if not is_valid_email(email):
+            self.write_json(400, {"error": "A valid email address is required."})
+            return
+
+        if len(password) < 6:
+            self.write_json(400, {"error": "Password must be at least 6 characters."})
+            return
+
+        user = create_or_verify_user(email, role, password)
+        if user is None:
+            self.write_json(401, {"error": "Incorrect password for that account."})
+            return
+
+        self.write_json(
             200,
             {
                 "ok": True,
-                "message": f"Registration request sent to {self.approval_email} for approval.",
+                "created": user["created"],
+                "user": {
+                    "email": user["email"],
+                    "role": user["role"],
+                },
             },
         )
 
-    def handle_decision(self, parsed, approved: bool) -> None:
-        query = parse_qs(parsed.query)
-        token = query.get("token", [""])[0]
-
-        if not token:
-            html_response(self, 400, "Missing token", "This approval link is missing its token.")
+    def handle_agent_request(self):
+        if not API_KEY:
+            self.write_json(500, {"error": "GEMINI_API_KEY is missing in .env.local."})
             return
 
-        state = load_state(self.state_file)
-        pending_accounts = state["pending_accounts"]
-        match_index = next(
-            (index for index, account in enumerate(pending_accounts) if account.get("token") == token),
-            None,
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self.write_json(400, {"error": "Invalid JSON body."})
+            return
+
+        message = str(payload.get("message", "")).strip()
+        project = payload.get("project", {})
+        role = payload.get("role") or "unknown"
+        team_id = payload.get("teamId")
+        chat_history = payload.get("chatHistory") or []
+
+        if not message:
+            self.write_json(400, {"error": "A message is required."})
+            return
+
+        active_team = None
+        for team in project.get("teams", []):
+            if team.get("id") == team_id:
+                active_team = team.get("name")
+                break
+
+        system_instruction = "\n".join(
+            [
+                "You are Quantum Assistant, a Gemini-powered project tracker agent.",
+                "Answer using only the project data provided below. If the answer is not in the data, say that clearly instead of inventing details.",
+                "Be concise, practical, and helpful.",
+                "You can summarize blockers, deadlines, team structure, notes, bugs, and scheduled tasks.",
+                "You do not directly edit the project from chat in this version; tell the user to use the manager tools in the app when they ask to change data.",
+                f"Gemini model in use: {MODEL}.",
+                f"Current app role: {role}.",
+                f"Current active team: {active_team or 'none selected'}.",
+                "Project data:",
+                json.dumps(project),
+            ]
         )
 
-        if match_index is None:
-            html_response(self, 404, "Request not found", "That registration request was not found or was already handled.")
-            return
+        contents = []
+        for item in chat_history[-12:]:
+            text = str(item.get("text", "")).strip()
+            role_name = item.get("role") or "user"
+            if not text:
+                continue
+            contents.append({"role": role_name, "parts": [{"text": text}]})
 
-        pending_account = pending_accounts.pop(match_index)
-        if approved:
-            state["approved_accounts"].append(
-                {
-                    "email": pending_account["email"],
-                    "password_hash": pending_account["password_hash"],
-                    "approved_at": now_iso(),
-                }
-            )
-            save_state(self.state_file, state)
-            html_response(
-                self,
-                200,
-                "Account approved",
-                f"{pending_account['email']} is now approved and can log in.",
-            )
-            return
+        if not contents or contents[-1]["parts"][0]["text"] != message:
+            contents.append({"role": "user", "parts": [{"text": message}]})
 
-        save_state(self.state_file, state)
-        html_response(
-            self,
-            200,
-            "Account denied",
-            f"{pending_account['email']} was denied registration.",
+        request_body = {
+            "system_instruction": {"parts": [{"text": system_instruction}]},
+            "contents": contents,
+        }
+
+        endpoint = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{MODEL}:generateContent"
         )
 
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(request_body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": API_KEY,
+            },
+            method="POST",
+        )
 
-def main() -> None:
-    args = parse_args()
-    web_root = Path(__file__).resolve().parent
-    os.chdir(web_root)
-    state_file = web_root / "server_state.json"
-    approval_email = os.getenv("APPROVAL_EMAIL", "mail2farhan.aws@gmail.com")
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            try:
+                error_payload = json.loads(error.read().decode("utf-8"))
+                error_message = (
+                    error_payload.get("error", {}).get("message")
+                    or "Gemini request failed."
+                )
+            except Exception:
+                error_message = "Gemini request failed."
 
-    def handler(*handler_args, **handler_kwargs):
-        return AppHandler(*handler_args, state_file=state_file, approval_email=approval_email, **handler_kwargs)
+            self.write_json(error.code, {"error": error_message})
+            return
+        except Exception as error:
+            self.write_json(500, {"error": f"Gemini request failed: {error}"})
+            return
 
-    server = ThreadingHTTPServer((args.host, args.port), handler)
-    print(f"Serving {web_root} at http://{args.host}:{args.port}")
-    print(f"Approval emails will be sent to {approval_email}")
+        text = extract_response_text(response_payload)
+        self.write_json(200, {"text": text})
 
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nShutting down.")
-    finally:
-        server.server_close()
+    def serve_static(self):
+        request_path = "/index.html" if self.path == "/" else self.path
+        relative = pathlib.Path(request_path.lstrip("/"))
+        file_path = (ROOT / relative).resolve()
+
+        if ROOT not in file_path.parents and file_path != ROOT / "index.html":
+            self.write_json(403, {"error": "Forbidden."})
+            return
+
+        if not file_path.exists() or not file_path.is_file():
+            self.write_json(404, {"error": "Not found."})
+            return
+
+        self.send_response(200)
+        self.send_cors_headers()
+        self.send_header("Content-Type", MIME_TYPES.get(file_path.suffix.lower(), "application/octet-stream"))
+        self.end_headers()
+        self.wfile.write(file_path.read_bytes())
+
+    def write_json(self, status_code, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_cors_headers()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def log_message(self, fmt, *args):
+        return
+
+
+def extract_response_text(payload):
+    candidates = payload.get("candidates") or []
+    for candidate in candidates:
+      content = candidate.get("content") or {}
+      parts = content.get("parts") or []
+      texts = [part.get("text", "") for part in parts if part.get("text")]
+      if texts:
+          return "\n".join(texts).strip()
+
+    prompt_feedback = payload.get("promptFeedback")
+    if prompt_feedback:
+        return f"Gemini returned no text. Feedback: {json.dumps(prompt_feedback)}"
+
+    return "Gemini returned no text."
+
+
+def main():
+    init_auth_db()
+    server = ThreadingHTTPServer((HOST, PORT), ProjectTrackerHandler)
+    print(f"Quantum Scope Python server running at http://{HOST}:{PORT}")
+    server.serve_forever()
+
+
+def current_timestamp() -> str:
+    return __import__("datetime").datetime.utcnow().isoformat() + "Z"
 
 
 if __name__ == "__main__":
