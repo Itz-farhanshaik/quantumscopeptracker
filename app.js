@@ -10,7 +10,7 @@ const seedState = {
 };
 
 const allowedLogins = {
-  "malik.qscope": { password: "uncool", role: "manager" },
+  "malik@qscope": { password: "uncool", role: "manager" },
   "qscope admin": { password: "admin", role: "manager" }
 };
 
