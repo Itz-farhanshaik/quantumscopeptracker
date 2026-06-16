@@ -9,9 +9,14 @@ const seedState = {
   projects: []
 };
 
+const allowedLogins = {
+  "malik.qscope": { password: "uncool", role: "manager" },
+  "qscope admin": { password: "admin", role: "manager" }
+};
+
 let state = loadState();
 let currentUser = loadSession();
-let currentRole = currentUser?.role ?? null;
+let currentRole = currentUser?.role ?? "manager";
 let currentProjectId = state.projects[0]?.id ?? null;
 let currentTeamId = null;
 let currentProjectFormMode = "create";
@@ -224,7 +229,8 @@ function loadSession() {
 
   try {
     const parsed = JSON.parse(saved);
-    return isValidEmail(parsed?.email) && isValidRole(parsed?.role) ? parsed : null;
+    const login = allowedLogins[String(parsed?.email || "").trim().toLowerCase()];
+    return login && parsed?.role === login.role ? parsed : null;
   } catch (error) {
     console.warn("Could not parse saved session.", error);
     return null;
@@ -497,66 +503,40 @@ function renderLogin() {
 }
 
 async function handleLogin() {
-  const email = loginEmailInput.value.trim().toLowerCase();
+  const username = loginEmailInput.value.trim().toLowerCase();
   const password = loginPasswordInput.value;
 
-  if (!currentRole) {
-    showLoginFeedback("Choose whether you are entering as project manager or team member.");
+  if (!username) {
+    showLoginFeedback("Enter your username.");
     return;
   }
 
-  if (!isValidEmail(email)) {
-    showLoginFeedback("Enter a valid email address.");
+  if (!password) {
+    showLoginFeedback("Enter your password.");
     return;
   }
 
-  if (!password || password.length < 6) {
-    showLoginFeedback("Enter a password with at least 6 characters.");
+  const account = allowedLogins[username];
+  if (!account || account.password !== password) {
+    showLoginFeedback("Incorrect username or password.");
     return;
   }
 
-  loginButton.disabled = true;
-
-  try {
-    const response = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        role: currentRole
-      })
-    });
-
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      showLoginFeedback(payload.error || "Login failed.");
-      return;
-    }
-
-    currentUser = {
-      email: payload.user.email,
-      role: payload.user.role,
-      signedInAt: timestampIso()
-    };
-    currentRole = payload.user.role;
-    saveSession();
-    clearLoginFeedback();
-    refreshUi(false);
-    showScreen("project-list", false);
-  } catch (error) {
-    showLoginFeedback("Could not reach the local login server. Open the app through http://127.0.0.1:3000.");
-  } finally {
-    loginButton.disabled = false;
-  }
+  currentUser = {
+    email: username,
+    role: account.role,
+    signedInAt: timestampIso()
+  };
+  currentRole = account.role;
+  saveSession();
+  clearLoginFeedback();
+  refreshUi(false);
+  showScreen("project-list", false);
 }
 
 function handleLogout() {
   currentUser = null;
-  currentRole = null;
+  currentRole = "manager";
   currentTeamId = null;
   screenHistory.length = 0;
   clearSession();
@@ -572,10 +552,6 @@ function showLoginFeedback(message) {
 function clearLoginFeedback() {
   loginFeedback.textContent = "";
   loginFeedback.classList.add("hidden");
-}
-
-function isValidEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
 function isValidRole(value) {
