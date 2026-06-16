@@ -1,8 +1,3 @@
-const builtInCredentials = {
-  "tester001@qscope": "test001",
-  "admin@qscope": "admin",
-};
-
 const loginScreen = document.getElementById("loginScreen");
 const dashboardScreen = document.getElementById("dashboardScreen");
 const loginForm = document.getElementById("loginForm");
@@ -63,19 +58,13 @@ function saveProjects() {
 }
 
 async function apiRequest(path, payload) {
-  let response;
-
-  try {
-    response = await fetch(path, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    throw new Error("Backend unavailable. Start `python3 server.py` and try again.");
-  }
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 
   const data = await response.json().catch(() => ({}));
 
@@ -197,14 +186,7 @@ loginForm.addEventListener("submit", async (event) => {
     loginError.textContent = "";
     showDashboard(result.email || email);
   } catch (error) {
-    if (builtInCredentials[email] && builtInCredentials[email] === password) {
-      loginError.textContent = "";
-      showDashboard(email);
-      return;
-    }
-
-    loginError.textContent =
-      error instanceof Error ? error.message : "Invalid email or password.";
+    loginError.textContent = error instanceof Error ? error.message : "Invalid email or password.";
   }
 });
 
@@ -233,8 +215,7 @@ registerForm.addEventListener("submit", async (event) => {
     loginForm.querySelector("#email").value = email;
     loginError.textContent = result.message || "Request sent to mail2farhan.aws@gmail.com for approval.";
   } catch (error) {
-    registerError.textContent =
-      error instanceof Error ? error.message : "Registration failed.";
+    registerError.textContent = error instanceof Error ? error.message : "Registration failed.";
   }
 });
 
